@@ -3,6 +3,7 @@
 #include <log.h>
 #include "xbox_live.h"
 #include "../xbox_live_helper.h"
+#include "../util.h"
 #include <msa/client/error.h>
 
 std::shared_ptr<FakeJni::JString> XboxInterop::getLocalStoragePath(std::shared_ptr<Context> context) {
@@ -123,3 +124,39 @@ void XboxLoginCallback::onError(int httpStatus, int status, std::shared_ptr<Fake
     XboxInterop::authFlowCallback(jvm, userPtr, XboxInterop::AUTH_FLOW_ERROR, "");
 }
 
+std::string findWebView() {
+    std::string path;
+#ifdef MCPELAUNCHER_WEBVIEW_PATH
+    if (EnvPathUtil::findInPath("mcpelauncher-webview", path, MCPELAUNCHER_WEBVIEW_PATH, EnvPathUtil::getAppDir().c_str()))
+        return path;
+#endif
+    if (EnvPathUtil::findInPath("mcpelauncher-webview", path))
+        return path;
+    return std::string();
+}
+
+std::string exec_get_stdout(const char* command) {
+    std::array<char, 128> buffer{};
+    std::string result;
+    std::shared_ptr<FILE> pipe(popen(command, "r"), pclose);
+    if (!pipe) throw std::runtime_error("popen() failed!");
+    while (!feof(pipe.get())) {
+        if (fgets(buffer.data(), 128, pipe.get()) != nullptr)
+            result += buffer.data();
+    }
+    return result;
+}
+
+void WebView::showUrl(FakeJni::JLong l, std::shared_ptr<Context> ctx, std::shared_ptr<FakeJni::JString> starturl,
+                      std::shared_ptr<FakeJni::JString> endurl, FakeJni::JInt i, FakeJni::JBoolean z, FakeJni::JLong j2) {
+    auto a = starturl->asStdString();
+    auto b = endurl->asStdString();
+
+    auto webview_path = findWebView();
+    auto result = exec_get_stdout((webview_path + " \"" + a + "\" \"" + b + "\"").c_str());
+    trim(result);
+
+    auto method = WebView::getDescriptor()->getMethod("(JLjava/lang/String;ZLjava/lang/String;)V", "urlOperationSucceeded");
+    FakeJni::LocalFrame frame;
+    method->invoke(frame.getJniEnv(), WebView::getDescriptor().get(), l, frame.getJniEnv().createLocalReference(std::make_shared<FakeJni::JString>(result)), false, frame.getJniEnv().createLocalReference(std::make_shared<FakeJni::JString>("webkit-noDefault::0::none")));
+}
